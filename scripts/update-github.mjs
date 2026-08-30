@@ -39,8 +39,7 @@ const QUERY = `
   query($login: String!) {
     user(login: $login) {
       contributionsCollection {
-        totalCommitContributions
-        totalPullRequestContributions
+        restrictedContributionsCount
         contributionCalendar {
           weeks { contributionDays { date contributionCount contributionLevel } }
         }
@@ -49,6 +48,15 @@ const QUERY = `
           contributions { totalCount }
         }
       }
+      # commitContributionsByRepository only itemises repositories the token can
+      # see, so private work would vanish from the "and N other" count. These
+      # totals include it.
+      publicRepos: repositoriesContributedTo(
+        contributionTypes: [COMMIT], includeUserRepositories: true, privacy: PUBLIC
+      ) { totalCount }
+      privateRepos: repositoriesContributedTo(
+        contributionTypes: [COMMIT], includeUserRepositories: true, privacy: PRIVATE
+      ) { totalCount }
     }
   }`;
 
@@ -67,7 +75,9 @@ async function collect() {
   const body = await res.json();
   if (body.errors) throw new Error("GraphQL: " + JSON.stringify(body.errors));
 
-  const c = body.data.user.contributionsCollection;
+  const user = body.data.user;
+  const c = user.contributionsCollection;
+  const repoCount = user.publicRepos.totalCount + user.privateRepos.totalCount;
 
   // The grid is laid out column-by-column with 7 rows, so the days have to stay
   // in calendar order — GitHub's weeks already begin on Sunday.
@@ -101,8 +111,13 @@ async function collect() {
     .sort((a, b) => b.contributions.totalCount - a.contributions.totalCount)
     .map((r) => r.repository.nameWithOwner);
 
-  const commits = c.totalCommitContributions;
-  const prs = c.totalPullRequestContributions;
+  // Most of the work is in private client repos, which the calendar counts but
+  // does not itemise. The card surfaces that share rather than a commits-vs-PRs
+  // ratio, which is always 100% for someone who commits straight to main.
+  const total = counts.reduce((a, b) => a + b, 0);
+  const privateShare = total === 0
+    ? 0
+    : Math.round((c.restrictedContributionsCount / total) * 100);
 
   return {
     user: LOGIN,
@@ -111,13 +126,13 @@ async function collect() {
     to: iso(end),
     // Rendered as "Updated · 29 Aug 2026" — the day matters, the refresh is daily.
     asOf: end.getUTCDate() + " " + MONTHS[end.getUTCMonth()] + " " + end.getUTCFullYear(),
-    total: counts.reduce((a, b) => a + b, 0),
+    total,
     activeDays,
     longestStreak,
     busiest,
-    commitShare: commits + prs === 0 ? 0 : Math.round((commits / (commits + prs)) * 100),
+    privateShare,
     repos: repos.slice(0, 3),
-    otherRepos: Math.max(0, repos.length - 3),
+    otherRepos: Math.max(0, repoCount - Math.min(3, repos.length)),
     levels: levels.join(""),
     counts,
   };
@@ -140,7 +155,7 @@ function render(g) {
     "  activeDays: " + g.activeDays + ",",
     "  longestStreak: " + g.longestStreak + ",",
     "  busiest: { date: " + JSON.stringify(g.busiest.date) + ", count: " + g.busiest.count + " },",
-    "  commitShare: " + g.commitShare + ",",
+    "  privateShare: " + g.privateShare + ",",
     "  repos: [" + g.repos.map((r) => JSON.stringify(r)).join(", ") + "],",
     "  otherRepos: " + g.otherRepos + ",",
     "  // One character per day: GitHub's 0-4 intensity level.",
@@ -203,5 +218,5 @@ const changed = repack(stats);
 console.log(
   (changed ? "updated" : "no change") + ": " + stats.total + " contributions, " +
   stats.activeDays + " active days, streak " + stats.longestStreak + ", " +
-  stats.commitShare + "% commits, as of " + stats.asOf
+  stats.privateShare + "% private, as of " + stats.asOf
 );
