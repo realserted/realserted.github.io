@@ -2,11 +2,11 @@
   <!-- The LLS wordmark's L, slanted like the nav's italic serif. Ground and
        letter swap for dark browser chrome. -->
   <style>
-    .ground { fill: #584738 }  /* Mahogany */
+    .ground { fill: #2E251C }  /* Ink      */
     .letter { fill: #F1EADA }  /* Vanilla  */
     @media (prefers-color-scheme: dark) {
       .ground { fill: #D6BD98 }  /* Almond  */
-      .letter { fill: #1A3636 }  /* Eclipse */
+      .letter { fill: #0E1312 }  /* Paper   */
     }
   </style>
   <rect class="ground" width="32" height="32" rx="7"/>
